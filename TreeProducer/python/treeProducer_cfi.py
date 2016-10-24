@@ -1,4 +1,6 @@
 import FWCore.ParameterSet.Config as cms
 
-demo = cms.EDAnalyzer('TreeProducer'
+ctppsTreeProducer = cms.EDAnalyzer('TreeProducer',
+    stripsLocalTrackLabel = cms.InputTag('totemRPLocalTrackFitter'),
+    diamondDigiLabel = cms.InputTag('diamondRPRawToDigi'),
 )
