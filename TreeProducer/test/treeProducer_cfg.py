@@ -4,7 +4,7 @@ process = cms.Process('Demo')
 
 process.load('FWCore.MessageService.MessageLogger_cfi')
 
-process.maxEvents = cms.untracked.PSet( input = cms.untracked.int32(1000) )
+process.maxEvents = cms.untracked.PSet( input = cms.untracked.int32(5000) )
 
 process.load('EventFilter.CTPPSRawToDigi.totemTriggerRawToDigi_cfi')
 

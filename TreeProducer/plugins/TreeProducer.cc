@@ -36,6 +36,7 @@
 #include "DataFormats/CTPPSDigi/interface/CTPPSDiamondDigi.h"
 
 #include "TTree.h"
+#include "TH2.h"
 
 class TreeProducer : public edm::one::EDAnalyzer<edm::one::SharedResources>  {
   public:
@@ -50,6 +51,7 @@ class TreeProducer : public edm::one::EDAnalyzer<edm::one::SharedResources>  {
     virtual void endJob() override;
 
     void clearTree();
+    void extrapolateToDiamonds( const TotemRPLocalTrack&, float*, float* ) const;
 
     edm::EDGetTokenT< edm::DetSetVector<TotemRPLocalTrack> > stripsLocalTrackToken_;
     edm::EDGetTokenT< edm::DetSetVector<CTPPSDiamondDigi> > diamondDigiToken_;
@@ -59,11 +61,14 @@ class TreeProducer : public edm::one::EDAnalyzer<edm::one::SharedResources>  {
     std::vector<unsigned short> strips_tracks_detid_;
     std::vector<float> strips_tracks_x0_, strips_tracks_y0_, strips_tracks_z0_;
     std::vector<float> strips_tracks_sigx0_, strips_tracks_sigy0_;
+    std::vector<float> strips_tracks_xdiam_, strips_tracks_ydiam_;
     std::vector<float> strips_tracks_tx_, strips_tracks_ty_;
     std::vector<float> strips_tracks_sigtx_, strips_tracks_sigty_;
     // diamonds leaves
     std::vector<unsigned short> diam_digis_detid_, diam_digis_channelid_;
     std::vector<unsigned int> diam_digis_leadedge_, diam_digis_trailedge_, diam_digis_thresvolt_;
+
+    TH2D* hitmap_trks_diam_plus_, *hitmap_trks_diam_minus_;
 };
 
 TreeProducer::TreeProducer( const edm::ParameterSet& iConfig ) :
@@ -73,6 +78,8 @@ TreeProducer::TreeProducer( const edm::ParameterSet& iConfig ) :
   usesResource( "TFileService" );
   edm::Service<TFileService> fs;
   tree_ = fs->make<TTree>( "tree", "" );
+  hitmap_trks_diam_plus_ = fs->make<TH2D>( "hitmap_trks_diam_plus", "Proton hits at first diamond station (z > 0, extrapolated from strips tracks);x (m);y (m)", 500, -0.25, 0.25, 500, -0.25, 0.25 );
+  hitmap_trks_diam_minus_ = fs->make<TH2D>( "hitmap_trks_diam_minus", "Proton hits at first diamond station (z < 0, extrapolated from strips tracks);x (m);y (m)", 500, -0.25, 0.25, 500, -0.25, 0.25 );
 }
 
 
@@ -89,6 +96,7 @@ TreeProducer::clearTree()
   strips_tracks_sigx0_.clear(); strips_tracks_sigy0_.clear();
   strips_tracks_tx_.clear(); strips_tracks_ty_.clear();
   strips_tracks_sigtx_.clear(); strips_tracks_sigty_.clear();
+  strips_tracks_xdiam_.clear(); strips_tracks_ydiam_.clear();
 
   // diamonds leaves
   diam_digis_detid_.clear(); diam_digis_channelid_.clear();
@@ -112,16 +120,25 @@ TreeProducer::analyze( const edm::Event& iEvent, const edm::EventSetup& iSetup )
     for ( edm::DetSet<TotemRPLocalTrack>::const_iterator striplt=stripds->begin(); striplt!=stripds->end(); striplt++ ) {
       if ( !striplt->isValid() ) continue;
 
+      float x_diam, y_diam;
+      extrapolateToDiamonds( *striplt, &x_diam, &y_diam );
+
       strips_tracks_detid_.push_back( detid );
-      strips_tracks_x0_.push_back( striplt->getX0() );
-      strips_tracks_sigx0_.push_back( striplt->getX0Sigma() );
-      strips_tracks_y0_.push_back( striplt->getY0() );
-      strips_tracks_sigy0_.push_back( striplt->getY0Sigma() );
-      strips_tracks_z0_.push_back( striplt->getZ0() );
-      strips_tracks_tx_.push_back( striplt->getTx() );
-      strips_tracks_sigtx_.push_back( striplt->getTxSigma() );
-      strips_tracks_ty_.push_back( striplt->getTy() );
-      strips_tracks_sigty_.push_back( striplt->getTySigma() );
+      strips_tracks_x0_.push_back( striplt->getX0()/1.e3 );
+      strips_tracks_sigx0_.push_back( striplt->getX0Sigma()/1.e3 );
+      strips_tracks_y0_.push_back( striplt->getY0()/1.e3 );
+      strips_tracks_sigy0_.push_back( striplt->getY0Sigma()/1.e3 );
+      strips_tracks_z0_.push_back( striplt->getZ0()/1.e3 );
+      strips_tracks_tx_.push_back( striplt->getTx()/1.e3 );
+      strips_tracks_sigtx_.push_back( striplt->getTxSigma()/1.e3 );
+      strips_tracks_ty_.push_back( striplt->getTy()/1.e3 );
+      strips_tracks_sigty_.push_back( striplt->getTySigma()/1.e3 );
+      strips_tracks_xdiam_.push_back( x_diam );
+      strips_tracks_ydiam_.push_back( y_diam );
+
+      if ( striplt->getZ0()>0 ) hitmap_trks_diam_plus_->Fill( x_diam, y_diam );
+      else                      hitmap_trks_diam_minus_->Fill( x_diam, y_diam );
+
     }
   }
 
@@ -139,6 +156,17 @@ TreeProducer::analyze( const edm::Event& iEvent, const edm::EventSetup& iSetup )
   tree_->Fill();
 }
 
+void
+TreeProducer::extrapolateToDiamonds( const TotemRPLocalTrack& lt, float* x, float* y ) const
+{
+  *x = *y = 0.;
+  if ( !lt.isValid() ) return;
+
+  const float z_diam = ( lt.getZ0()>0. ) ? 215.5e3 : -215.5e3;
+
+  *x = ( lt.getX0()+( z_diam-lt.getZ0() )*lt.getTx() )/1.e3;
+  *y = ( lt.getY0()+( z_diam-lt.getZ0() )*lt.getTy() )/1.e3;
+}
 
 // ------------ method called once each job just before starting event loop  ------------
 void 
@@ -154,6 +182,8 @@ TreeProducer::beginJob()
   tree_->Branch( "strips_track_Ty", &strips_tracks_ty_ );
   tree_->Branch( "strips_track_Tx_sig", &strips_tracks_sigtx_ );
   tree_->Branch( "strips_track_Ty_sig", &strips_tracks_sigty_ );
+  tree_->Branch( "strips_track_x_diam", &strips_tracks_xdiam_ );
+  tree_->Branch( "strips_track_y_diam", &strips_tracks_ydiam_ );
 
   tree_->Branch( "diamonds_digi_detid", &diam_digis_detid_ );
   tree_->Branch( "diamonds_digi_channelid", &diam_digis_channelid_ );
